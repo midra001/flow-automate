@@ -1,0 +1,37 @@
+[
+  {
+    "name": "cubeThicknessMap.ktx2",
+    "width": 2048,
+    "height": 2048
+  },
+  {
+    "name": "cubeThicknessMapBase.ktx2",
+    "width": 1024,
+    "height": 1024
+  },
+  {
+    "name": "hero-cube-ao.ktx2",
+    "width": 1024,
+    "height": 1024
+  },
+  {
+    "name": "hero-cube-details.ktx2",
+    "width": 1024,
+    "height": 1024
+  },
+  {
+    "name": "hero-cube-edges.ktx2",
+    "width": 1024,
+    "height": 1024
+  },
+  {
+    "name": "hero-cube-grid.ktx2",
+    "width": 1024,
+    "height": 1024
+  },
+  {
+    "name": "hero-cube-hex.ktx2",
+    "width": 512,
+    "height": 512
+  }
+]

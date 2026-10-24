@@ -1,0 +1,20 @@
+node_modules/
+.expo/
+dist/
+web-build/
+coverage/
+
+.env
+.env.*
+!.env.example
+
+flowautomate-proxy/node_modules/
+flowautomate-proxy/.env
+flowautomate-proxy/.env.*
+!flowautomate-proxy/.env.example
+
+.DS_Store
+Thumbs.db
+
+# Local diagnostic file
+structure.txt
