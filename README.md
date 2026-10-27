@@ -736,19 +736,6 @@ These are implementation details of the supplied snapshot, not claims about an u
 | History is empty after a manual run | The execution screen does not currently save its run to Firestore; wire recording before expecting History entries. |
 | Scheduled jobs stop after closing the tab | Expected: scheduling is frontend-based, not a server worker. |
 
-## Contributing
-
-Contributions should keep the visual node catalog, configuration UI, and execution behavior consistent.
-
-1. Start with the complete project checkout and restore the missing setup files.
-2. Create a focused branch for the change.
-3. Implement or update the relevant node configuration and main-runner behavior together.
-4. Add backend tests when modifying OAuth, provider actions, listener behavior, or validation.
-5. Run the supplied backend suite and manually exercise the affected frontend flow.
-6. Update this README when fields, limits, setup requirements, or supported actions change.
-
-High-value improvements include real authentication, user-scoped Firestore access, unified node execution, corrected history recording, durable scheduling/approvals, server-side secret handling, and frontend tests. These are contribution opportunities, not implemented features or delivery commitments.
-
 ```
 
 FlowAutomate is distributed under the **GNU General Public License, version 3 or, at your option, any later version**, without warranty. The uploaded archive does not include the full `LICENSE` file; restore it from the project or add the applicable [GNU GPL v3 license text](https://www.gnu.org/licenses/gpl-3.0.html) before redistribution.
