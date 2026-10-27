@@ -1,17 +1,25 @@
-// src/screens/LandingScreen.js
-// FlowAutomate landing screen. Typewriter headline over a full-bleed Three.js / WebGL
-// landscape (glowing cube on reflective water, cliffs, stars, bloom) – see src/components/HeroScene.js.
-// Requires: npm i react-native-svg three   (expo: npx expo install react-native-svg && npm i three)
-//
-// Animations:
-//  1. Typewriter headline: types forward with a "glitch" character trailing the
-//     cursor, holds, then backspaces (also with glitch chars), then pauses empty.
-//  2. Per-character purple -> mint gradient on the rotating word, on a fixed scale
-//     (short words stay mostly purple, long ones reach mint).
-//  3. Dim block cursor that blinks after the word.
-//  4. Each time the word is cleared, the scene on the right pulses (ring on the
-//     water, scan line up the cube, face patterns morph).
-//  5. Hover: "Start for free" goes purple.
+/*
+ * This file is part of FlowAutomate.
+ *
+ * Copyright © 2026 midra001
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * FlowAutomate is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * FlowAutomate is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * @author midra001
+ * @since 2026-09-26
+ */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Pressable, Platform, useWindowDimensions } from 'react-native';

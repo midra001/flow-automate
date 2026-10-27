@@ -13,6 +13,9 @@ flowautomate-proxy/.env
 flowautomate-proxy/.env.*
 !flowautomate-proxy/.env.example
 
+# Local backend data and encrypted credentials
+flowautomate-proxy/.data/
+
 .DS_Store
 Thumbs.db
 

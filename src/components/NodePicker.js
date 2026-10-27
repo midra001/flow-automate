@@ -1,7 +1,25 @@
-// src/components/NodePicker.js
-// Restyled to match the FlowAutomate screens: black rounded dialog, outlined node
-// cards in a grid with hover state, purple-focus search box.
-// Includes the merged Gemini AI Extraction and Discord Action nodes.
+/*
+ * This file is part of FlowAutomate.
+ *
+ * Copyright © 2026 midra001
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * FlowAutomate is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * FlowAutomate is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * @author midra001
+ * @since 2026-09-26
+ */
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -122,7 +140,22 @@ const NODE_CATALOG = [
   {
     type: 'gmail_send',
     label: 'Send via Gmail',
-    desc: 'Sends an email with optional attachments via Google Apps Script',
+    desc: 'Send Gmail with Google OAuth and optional workflow-data attachments',
+  },
+  {
+    type: 'gmail_read',
+    label: 'Read Gmail',
+    desc: 'Search and read Gmail messages using Google OAuth',
+  },
+  {
+    type: 'google_sheets',
+    label: 'Google Sheets',
+    desc: 'Read spreadsheet rows or append a JSON array of rows',
+  },
+  {
+    type: 'google_drive',
+    label: 'Google Drive',
+    desc: 'List app-accessible files or upload workflow output as text / JSON',
   },
   {
     type: 'inbound_email',

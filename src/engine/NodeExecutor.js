@@ -1,5 +1,40 @@
+/*
+ * This file is part of FlowAutomate.
+ *
+ * Copyright © 2026 midra001
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * FlowAutomate is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * FlowAutomate is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * @author midra001
+ * @since 2026-09-26
+ */
+
+import { executeGoogleNode, usesGoogleOAuth } from '../services/googleService.js';
+function resolveGooglePrevious(value, input) {
+  if (typeof value !== 'string') return value;
+  return value.replace(/\{\{\s*prev\.output(?:\.([a-zA-Z0-9_.]+))?\s*\}\}/g, (_, path) => {
+    const result = path ? path.split('.').reduce((current, key) => current?.[key], input) : input;
+    return result === null || result === undefined ? '' : typeof result === 'object' ? JSON.stringify(result) : String(result);
+  });
+}
 import { sendDiscordMessage } from '../services/discordService.js';
 export async function executeNode(node, input) {
+  if (usesGoogleOAuth(node)) {
+    return { output: await executeGoogleNode(node, input, value => resolveGooglePrevious(value, input)) };
+  }
+  if (node.type === 'gmail_send') throw new Error('Legacy Apps Script Gmail nodes must run through WorkflowEngine, or switch this node to Google OAuth.');
   switch (node.type) {
     case 'manual_trigger': {
       return { output: { triggeredAt: new Date().toLocaleTimeString() } };

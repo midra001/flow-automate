@@ -1,3 +1,4 @@
+import GoogleNodeFields from '../components/GoogleNodeFields';
 // src/screens/NodeConfigScreen.js
 // Restyled to match the FlowAutomate landing / home / history screens:
 //  - near-black background, purple header glow, logo nav bar
@@ -462,64 +463,9 @@ export default function NodeConfigScreen({ route, navigation }) {
           </>
         )}
 
-        {/* Send via Gmail */}
-        {node.type === 'gmail_send' && (
-          <>
-            <Field
-              first
-              label="Apps Script Webhook URL"
-              value={config.webhookUrl || ''}
-              onChangeText={set('webhookUrl')}
-              placeholder="https://script.google.com/macros/s/..."
-            />
-            <Field
-              label="Recipient Email (To)"
-              value={config.to || ''}
-              onChangeText={set('to')}
-              placeholder="test@example.com"
-            />
-            <Field
-              label="Subject"
-              value={config.subject || ''}
-              onChangeText={set('subject')}
-              placeholder="Automated Alert"
-            />
-            <Field
-              kind="multiline"
-              style={{ minHeight: 80 }}
-              label="Email Body Message"
-              multiline
-              numberOfLines={4}
-              value={config.body || ''}
-              onChangeText={set('body')}
-              placeholder="Hello, here is your data: {{prev.output}}"
-            />
-
-            <View style={s.fieldGap}>
-              <Text style={s.label}>Attach Workflow Data as File?</Text>
-              <View style={s.opRow}>
-                <OptionPill
-                  label="Yes"
-                  active={!!config.attachData}
-                  onPress={() => setConfig((prev) => ({ ...prev, attachData: true }))}
-                />
-                <OptionPill
-                  label="No"
-                  active={!config.attachData}
-                  onPress={() => setConfig((prev) => ({ ...prev, attachData: false }))}
-                />
-              </View>
-            </View>
-
-            {config.attachData && (
-              <Field
-                label="Attachment File Name"
-                value={config.fileName || 'workflow_output.json'}
-                onChangeText={set('fileName')}
-                placeholder="output.json"
-              />
-            )}
-          </>
+        {/* Google Workspace integrations */}
+        {['gmail_send', 'gmail_read', 'google_sheets', 'google_drive'].includes(node.type) && (
+          <GoogleNodeFields type={node.type} config={config} setConfig={setConfig} />
         )}
 
         {/* Discord Action */}

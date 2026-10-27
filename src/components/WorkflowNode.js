@@ -1,11 +1,25 @@
-// src/components/WorkflowNode.js
-// Restyled to match the FlowAutomate screens: black rounded node card with a hover
-// border, SVG icons instead of emoji, outlined mini action buttons, outlined branch pill.
-// Geometry is unchanged (220x120 wrapper, 110px card, port offsets) so the cables and
-// "+" handles drawn by EditorScreen still line up exactly.
-// Props are unchanged: node, index, totalNodes, onConfigure, onDelete, onMoveUp,
-// onMoveDown, onToggleBranch.
-// Requires: react-native-svg
+/*
+ * This file is part of FlowAutomate.
+ *
+ * Copyright © 2026 midra001
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * FlowAutomate is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * FlowAutomate is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * @author midra001
+ * @since 2026-09-26
+ */
 
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
@@ -53,6 +67,9 @@ const NODE_THEMES = {
   notification: { color: '#F43F5E', icon: 'bell', category: 'Alert' },
   // not themed in the original, added so they don't fall back to the generic gear
   gmail_send: { color: '#F43F5E', icon: 'mail', category: 'Email' },
+  gmail_read: { color: '#F43F5E', icon: 'inbox', category: 'Google Gmail' },
+  google_sheets: { color: '#10B981', icon: 'storage', category: 'Google Sheets' },
+  google_drive: { color: '#F59E0B', icon: 'file', category: 'Google Drive' },
   inbound_email: { color: '#06B6D4', icon: 'inbox', category: 'Email Listener' },
 };
 const DEFAULT_THEME = { color: '#94A3B8', icon: 'gear', category: 'Action' };

@@ -1,3 +1,27 @@
+/*
+ * This file is part of FlowAutomate.
+ *
+ * Copyright © 2026 midra001
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * FlowAutomate is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * FlowAutomate is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * @author midra001
+ * @since 2026-09-26
+ */
+
+import { executeGoogleNode } from '../services/googleService.js';
 import { sendDiscordMessage, waitForDiscordEvent } from '../services/discordService.js';
 // src/engine/WorkflowEngine.js
 
@@ -540,7 +564,21 @@ export async function runWorkflow(nodes, onStepUpdate, resumeContext = null) {
           break;
         }
 
+        case 'gmail_read':
+        case 'google_sheets':
+        case 'google_drive': {
+          executionOutput = await executeGoogleNode(node, activeInput, value => resolveInterpolation(value, stepOutputs, activeInput));
+          internalOutput = executionOutput;
+          break;
+        }
+
         case 'gmail_send': {
+          const legacy = node.config?.googleProvider === 'legacy' || (node.config?.webhookUrl && !node.config?.googleProvider);
+          if (!legacy) {
+            executionOutput = await executeGoogleNode(node, activeInput, value => resolveInterpolation(value, stepOutputs, activeInput));
+            internalOutput = executionOutput;
+            break;
+          }
           const to = resolveInterpolation(node.config?.to || '', stepOutputs, activeInput);
           const subject = resolveInterpolation(node.config?.subject || '', stepOutputs, activeInput);
           const body = resolveInterpolation(node.config?.body || '', stepOutputs, activeInput);

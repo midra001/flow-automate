@@ -1,18 +1,45 @@
+/*
+ * This file is part of FlowAutomate.
+ *
+ * Copyright © 2026 midra001
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * FlowAutomate is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * FlowAutomate is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * @author midra001
+ * @since 2026-09-26
+ */
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const { EventStore, normalizeMessage } = require('./eventStore');
+const { createGoogleRouter } = require('./googleIntegration.cjs');
+const offlineClient = { isReady: () => false, user: null, destroy() {} };
 
 const validId = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
 const fail = (status, message) => Object.assign(new Error(message), { status, expose: true });
 
-function createApp({ client, store = new EventStore(), origins = ['http://localhost:8081', 'http://localhost:19006'] }) {
-  const app = express(); app.use((req, res, next) => { console.log(`[http] ${req.method} ${req.url}`); next(); });
+function createApp({ client = offlineClient, store = new EventStore(), origins = ['http://localhost:8081', 'http://localhost:19006'], googleOptions = {} } = {}) {
+  // OAuth codes must never appear in logs.
+  const app = express(); app.use((req, res, next) => { console.log(`[http] ${req.method} ${req.path}`); next(); });
   app.use(cors({ origin(origin, callback) {
     callback(origin && !origins.includes(origin) ? fail(403, 'Frontend origin is not allowed. Set FRONTEND_ORIGINS in the backend .env.') : null, true);
   } }));
   app.use(express.json({ limit: '12mb' }));
+  app.use('/api/google', createGoogleRouter(googleOptions));
   const ready = () => {
     if (!client.isReady()) throw fail(503, 'Discord bot is offline. Check the backend token, connection, and Message Content Intent.');
   };
@@ -75,7 +102,10 @@ function createApp({ client, store = new EventStore(), origins = ['http://localh
 
   // Old clients must not silently consume historical attachments.
   app.post('/api/discord/fetch', (req, res) => res.status(410).json({ error: 'Replace WorkflowEngine.js: Discord now uses live listeners instead of historical-message polling.' }));
-  app.use((error, req, res, next) => sendError(res, error));
+  app.use((error, req, res, next) => {
+    if (req.path.startsWith('/api/google')) return res.status(error.status || 500).json({ error: error.type === 'entity.too.large' ? 'Google request body is too large.' : error.status === 400 ? 'Invalid Google request JSON.' : 'Google request rejected by backend configuration.' });
+    sendError(res, error);
+  });
   return app;
 }
 
@@ -93,15 +123,16 @@ function sendError(res, error) {
 
 if (require.main === module) {
   const token = process.env.DISCORD_BOT_TOKEN;
-  if (!token) { console.error('Set DISCORD_BOT_TOKEN in flowautomate-proxy/.env before starting.'); process.exit(1); }
-  const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] });
+  const client = token ? new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] }) : offlineClient;
   const store = new EventStore();
+  if (token) {
     client.on('messageCreate', message => { console.log(`[discord] message in channel ${message.channelId} | bot=${message.author.bot} | files=${message.attachments.size} | active listeners=${store.sessions.size}`); const event = normalizeMessage(message); if (event) store.publish(event); });
-  client.on('clientReady', () => console.log(`Discord connected as ${client.user.username}`));
-  client.on('error', () => console.error('Discord connection error. Check network and bot configuration.'));
+    client.on('clientReady', () => console.log(`Discord connected as ${client.user.username}`));
+    client.on('error', () => console.error('Discord connection error. Check network and bot configuration.'));
+  }
   const origins = (process.env.FRONTEND_ORIGINS || 'http://localhost:8081,http://localhost:19006').split(',').map(s => s.trim());
-  const server = createApp({ client, store, origins }).listen(Number(process.env.PORT || 3000), process.env.HOST || '127.0.0.1', () => console.log('FlowAutomate Discord backend started.'));
-  client.login(token).catch(() => { console.error('Discord login failed. Verify bot token and enable Message Content Intent in the Developer Portal.'); server.close(); client.destroy(); process.exitCode = 1; });
+  const server = createApp({ client, store, origins }).listen(Number(process.env.PORT || 3000), process.env.HOST || '127.0.0.1', () => console.log(`FlowAutomate local backend started. Discord ${token ? 'enabled' : 'offline (Google-only mode)'}.`));
+  if (token) client.login(token).catch(() => { console.error('Discord login failed. Verify bot token and enable Message Content Intent in the Developer Portal.'); server.close(); client.destroy(); process.exitCode = 1; });
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { client.destroy(); server.close(() => process.exit(0)); });
 }
 

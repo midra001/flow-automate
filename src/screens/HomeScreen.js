@@ -1,10 +1,25 @@
-// src/screens/HomeScreen.js
-// Restyled to match the FlowAutomate landing page:
-//  - near-black background, purple glow behind the header
-//  - FlowAutomate logo + wordmark nav bar
-//  - rounded outlined cards in a responsive grid (title, meta, pill button)
-// Logic (Firestore, scheduler, import/export, sorting) is unchanged.
-// Requires: react-native-svg
+/*
+ * This file is part of FlowAutomate.
+ *
+ * Copyright © 2026 midra001
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * FlowAutomate is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * FlowAutomate is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * @author midra001
+ * @since 2026-09-26
+ */
 
 import React, { useState, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
 import {
