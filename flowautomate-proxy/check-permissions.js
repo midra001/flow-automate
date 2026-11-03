@@ -1,7 +1,6 @@
 /*
  * This file is part of FlowAutomate.
  *
- * Copyright © 2026 midra001
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * FlowAutomate is free software: you can redistribute it and/or modify
@@ -18,7 +17,6 @@
  * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
  *
  * @author midra001
- * @since 2026-09-26
  */
 
 require('dotenv').config();
