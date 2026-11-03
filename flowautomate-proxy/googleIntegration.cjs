@@ -1,7 +1,6 @@
 /*
  * This file is part of FlowAutomate.
  *
- * Copyright © 2026 midra001
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * FlowAutomate is free software: you can redistribute it and/or modify
@@ -18,7 +17,6 @@
  * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
  *
  * @author midra001
- * @since 2026-09-26
  */
 
 'use strict';
@@ -33,7 +31,25 @@ const SCOPES = Object.freeze({
   // Deliberately limited to files created by / explicitly opened with this app.
   drive: ['https://www.googleapis.com/auth/drive.file'],
 });
+const GMAIL_PROFILE_WARNING = 'Google authorization was saved, but Gmail availability could not be verified. Check that the Gmail API is enabled in the OAuth client\'s Google Cloud project, that this account has Gmail, and that Google Workspace policy allows access. Try a Gmail workflow; reconnect if permissions changed.';
+const CALLBACK_FAILURES = Object.freeze({
+  invalid_callback: 'The connection request expired, was canceled, or is no longer valid. Return to the app and start Connect again.',
+  configuration: 'Check the backend Google OAuth client, encryption key, and fixed redirect URI configuration.',
+  token_exchange: 'Google could not exchange the authorization code. Check the OAuth client and matching redirect URI, then start Connect again.',
+  permissions: 'Google did not confirm all requested permissions. Start Connect again and grant every selected permission, including previously connected services.',
+  offline_access: 'Google did not return valid offline credentials. Start Connect again with consent; do not disconnect a working connection unless needed.',
+  connection_changed: 'The connection changed while authorization was in progress. Return to the app and start Connect again.',
+  persistence: 'The backend could not save the connection. Check token-storage permissions and the backend encryption key.',
+});
 const error = (status, message) => Object.assign(new Error(message), { status });
+function grantedScopes(value, fallback) {
+  // OAuth 2.0 permits omission only when the granted scope equals the request.
+  // An explicit response is authoritative: never union it with old grants or
+  // trust callback query parameters. Keep exact permission checks below.
+  if (value === undefined) return [...fallback];
+  if (typeof value !== 'string') throw error(502, 'Google returned invalid permissions. Reconnect Google.');
+  return [...new Set(value.split(/\s+/).filter(Boolean))];
+}
 const text = (value, name, max = 1000, required = true) => {
   if (typeof value !== 'string' || value.length > max || (required && !value.trim()) || value.includes('\0')) throw error(400, `Invalid ${name}.`);
   return value;
@@ -152,7 +168,7 @@ function createGoogleRouter({ env = process.env, fetchImpl = globalThis.fetch, t
       catch (e) { if (e.invalidGrant) throw error(401, 'Google connection was revoked or expired. Disconnect and reconnect.'); throw e; }
       if (generation !== version) throw error(409, 'Google connection changed. Run the workflow again.');
       if (!result.access_token || !Number.isFinite(result.expires_in)) throw error(502, 'Google returned an invalid token response.');
-      const scopes = result.scope ? result.scope.split(' ') : original.scopes;
+      const scopes = grantedScopes(result.scope, original.scopes);
       save({ ...original, ...result, scopes, refresh_token: result.refresh_token || original.refresh_token, expires_at: now() + result.expires_in * 1000 });
       if (!original.scopes.every(scope => scopes.includes(scope))) throw error(403, 'Google permissions changed. Reconnect and grant the requested services.');
       return tokens;
@@ -182,25 +198,39 @@ function createGoogleRouter({ env = process.env, fetchImpl = globalThis.fetch, t
     res.set('Cache-Control', 'no-store'); res.set('Referrer-Policy', 'no-referrer'); res.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
     const pending = typeof req.query.state === 'string' ? states.get(req.query.state) : null;
     if (pending) states.delete(req.query.state);
-    let ok = false;
+    let ok = false, failure = 'invalid_callback', warning = null;
     try {
       if (!pending || pending.expires <= now() || pending.initiator !== configuredKeyHash.toString('hex') || pending.generation !== generation || req.query.error || typeof req.query.code !== 'string' || req.query.code.length > 4096) throw error(400, 'Invalid OAuth callback.');
-      const result = await google('https://oauth2.googleapis.com/token', { method: 'POST', body: new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: oauthConfig(), code: req.query.code, code_verifier: pending.verifier, grant_type: 'authorization_code' }) });
-      const scopes = typeof result.scope === 'string' ? result.scope.split(' ').filter(Boolean) : [];
+      failure = 'configuration';
+      const redirect = oauthConfig();
+      failure = 'token_exchange';
+      const result = await google('https://oauth2.googleapis.com/token', { method: 'POST', body: new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: redirect, code: req.query.code, code_verifier: pending.verifier, grant_type: 'authorization_code' }) });
+      failure = 'permissions';
+      const scopes = grantedScopes(result.scope, pending.scopes);
       if (!pending.scopes.every(scope => scopes.includes(scope))) throw error(403, 'Requested Google permissions were not all granted.');
       // A fresh consent must return its own refresh token. Never combine an old
       // account's refresh token with a newly selected account's access token.
+      failure = 'offline_access';
       if (!result.access_token || !Number.isFinite(result.expires_in) || !result.refresh_token) throw error(502, 'Missing Google offline authorization.');
       let email = null;
       if (scopes.includes(SCOPES.gmail[1])) {
-        const profile = await google('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: `Bearer ${result.access_token}` } });
-        email = typeof profile.emailAddress === 'string' ? profile.emailAddress : null;
+        // Profile is display-only enrichment, not proof of OAuth consent. API
+        // enablement, Workspace policy, or transient failures must not discard
+        // valid new credentials and leave the old connection looking unchanged.
+        try {
+          const profile = await google('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: `Bearer ${result.access_token}` } });
+          email = typeof profile.emailAddress === 'string' && profile.emailAddress ? profile.emailAddress : null;
+          if (!email) warning = GMAIL_PROFILE_WARNING;
+        } catch { warning = GMAIL_PROFILE_WARNING; }
       }
+      failure = 'connection_changed';
       if (pending.generation !== generation) throw error(409, 'Connection changed.');
-      save({ access_token: result.access_token, refresh_token: result.refresh_token, expires_at: now() + result.expires_in * 1000, scopes, email });
+      failure = 'persistence';
+      save({ access_token: result.access_token, refresh_token: result.refresh_token, expires_at: now() + result.expires_in * 1000, scopes, email, gmailProfileWarning: !!warning });
       generation++; states.clear(); ok = true;
     } catch { /* Never expose Google responses, codes, tokens, or query strings in HTML/logs. */ }
-    res.status(ok ? 200 : 400).type('html').send(`<!doctype html><meta charset="utf-8"><title>Google connection</title><h1>${ok ? 'Google connected' : 'Google connection not completed'}</h1><p>${ok ? 'You can close this window and return to the app.' : 'Close this window, return to the app, and start Connect again. Grant all selected permissions.'}</p>`);
+    // Only locally defined strings are interpolated, never provider/user text.
+    res.status(ok ? 200 : 400).type('html').send(`<!doctype html><meta charset="utf-8"><title>Google connection</title><h1>${ok ? 'Google connected' : 'Google connection not completed'}</h1><p>${ok ? 'You can close this window and return to the app.' : CALLBACK_FAILURES[failure]}</p>${ok ? (warning ? `<p>${warning}</p>` : '') : `<p>Diagnostic: ${failure}</p>`}`);
   }));
   router.use(protect);
   router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -219,7 +249,7 @@ function createGoogleRouter({ env = process.env, fetchImpl = globalThis.fetch, t
   }));
   router.get('/status', wrap(async (req, res) => {
     const current = load(), scopes = current?.scopes || [];
-    res.json({ connected: !!current, email: current?.email || null, scopes, services: services(scopes) });
+    res.json({ connected: !!current, email: current?.email || null, scopes, services: services(scopes), warning: current?.gmailProfileWarning ? GMAIL_PROFILE_WARNING : null });
   }));
   router.delete('/connection', wrap(async (req, res) => {
     let current; try { current = load(); } catch { /* Allow a local reset even with an unreadable store. */ }
