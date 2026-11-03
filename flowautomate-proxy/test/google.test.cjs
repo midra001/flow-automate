@@ -1,7 +1,6 @@
 /*
  * This file is part of FlowAutomate.
  *
- * Copyright © 2026 midra001
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * FlowAutomate is free software: you can redistribute it and/or modify
@@ -18,7 +17,6 @@
  * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
  *
  * @author midra001
- * @since 2026-09-26
  */
 
 'use strict';
@@ -111,7 +109,7 @@ test('OAuth state cannot move between server sessions and rejects canceled conse
 test('cumulative granular scopes; email only with Gmail; encrypted persistence', async t => {
   const f = await fixture(t); await f.connect('drive');
   let status = (await f.api('/status')).data;
-  assert.deepEqual(status, { connected: true, email: null, scopes: SCOPES.drive, services: { gmail: false, sheets: false, drive: true } });
+  assert.deepEqual(status, { connected: true, email: null, scopes: SCOPES.drive, services: { gmail: false, sheets: false, drive: true }, warning: null });
   assert.equal(f.calls.filter(c => c.url.endsWith('/profile')).length, 0);
   await f.connect('gmail'); await f.connect('sheets');
   status = (await f.api('/status')).data;
@@ -131,6 +129,87 @@ test('partial or missing granted scopes never connects; missing refresh token re
   assert.equal((await f.api('/status')).data.connected, false); assert.equal(fs.existsSync(f.tokenPath), false);
   f.setMock(call => call.url.endsWith('/token') ? json({ access_token: 'x', expires_in: 3600, scope: SCOPES.drive.join(' ') }) : null);
   assert.equal((await f.callback(await f.start('drive'))).status, 400);
+});
+
+test('Gmail profile failure does not roll back newly authorized scopes; warning is safe and survives restart', async t => {
+  const f = await fixture(t); await f.connect('sheets'); await f.connect('drive');
+  const url = await f.start('gmail');
+  const requested = url.searchParams.get('scope').split(' ');
+  assert.deepEqual(new Set(requested), new Set([...SCOPES.sheets, ...SCOPES.drive, ...SCOPES.gmail]));
+  f.setMock(call => call.url.endsWith('/profile') ? json({ error: { message: '<script>provider-secret</script>', status: 'PERMISSION_DENIED', details: [{ reason: 'SERVICE_DISABLED' }] } }, 403) : null);
+  const result = await f.callback(url);
+  assert.equal(result.status, 200); assert.match(result.data, /Google connected/);
+  assert.match(result.data, /Gmail API/); assert.match(result.data, /could not be verified/);
+  assert.ok(!/provider-secret|<script>|access-secret|refresh-secret|private-code/.test(result.data));
+  const status = (await f.api('/status')).data;
+  assert.deepEqual(status.services, { gmail: true, sheets: true, drive: true });
+  assert.deepEqual(new Set(status.scopes), new Set(requested)); assert.equal(status.email, null);
+  assert.match(status.warning, /Gmail API/);
+  const app = express().use('/api/google', createGoogleRouter(f.googleOptions)); const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve)); t.after(() => { server.closeAllConnections(); server.close(); });
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/google/status`, { headers: { Authorization: `Bearer ${f.env.GOOGLE_DEMO_API_KEY}` } });
+  assert.deepEqual(await response.json(), status);
+  f.setMock(null); await f.connect('gmail'); assert.equal((await f.api('/status')).data.warning, null);
+});
+
+test('profile transport, server, and malformed-response failures are nonfatal and never retain another account email', async t => {
+  for (const failure of ['network', 'server', 'unreadable', 'missing-email']) {
+    const f = await fixture(t); await f.connect('gmail');
+    f.setMock(call => {
+      if (!call.url.endsWith('/profile')) return null;
+      if (failure === 'network') throw new Error('private network detail');
+      if (failure === 'unreadable') return new Response('provider-secret', { status: 200 });
+      return json({}, failure === 'server' ? 503 : 200);
+    });
+    const result = await f.callback(await f.start('gmail'));
+    assert.equal(result.status, 200, failure);
+    const status = (await f.api('/status')).data;
+    assert.equal(status.email, null); assert.equal(status.services.gmail, true); assert.ok(status.warning);
+    assert.ok(!/private network detail|provider-secret/.test(result.data + JSON.stringify(status)));
+  }
+});
+
+test('omitted token scope means unchanged requested scope; explicit empty, malformed, partial, and lookalike scopes fail closed', async t => {
+  const f = await fixture(t);
+  f.setMock(call => call.url.endsWith('/token') ? json({ access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600 }) : null);
+  await f.connect('gmail');
+  assert.deepEqual((await f.api('/status')).data.scopes, SCOPES.gmail);
+  const stored = fs.readFileSync(f.tokenPath, 'utf8');
+  for (const scope of ['', null, [], SCOPES.gmail[0], SCOPES.gmail.join(' ') + '.evil']) {
+    f.setMock(call => call.url.endsWith('/token') ? json({ access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600, scope }) : null);
+    const result = await f.callback(await f.start('gmail'));
+    assert.equal(result.status, 400); assert.match(result.data, /Diagnostic: permissions/);
+    assert.equal(fs.readFileSync(f.tokenPath, 'utf8'), stored);
+  }
+  f.setMock(call => call.url.endsWith('/token') ? json({ access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600, scope: `  ${SCOPES.gmail.join('   ')}  ` }) : null);
+  await f.connect('gmail'); assert.deepEqual((await f.api('/status')).data.scopes, SCOPES.gmail);
+});
+
+test('callback failures give fixed stage diagnostics without Google or callback data and preserve previous connection', async t => {
+  const f = await fixture(t); await f.connect('drive');
+  const stored = fs.readFileSync(f.tokenPath, 'utf8');
+  for (const stage of ['token_exchange', 'offline_access', 'permissions']) {
+    const url = await f.start('gmail');
+    f.setMock(call => call.url.endsWith('/token') ? (stage === 'token_exchange' ? json({ error: 'invalid_grant', error_description: '<script>provider-secret</script>' }, 400) : json({ access_token: 'access-secret', expires_in: 3600, scope: stage === 'permissions' ? SCOPES.drive.join(' ') : url.searchParams.get('scope') })) : null);
+    const result = await f.callback(url);
+    assert.equal(result.status, 400); assert.match(result.data, new RegExp(`Diagnostic: ${stage}`));
+    assert.ok(!/provider-secret|<script>|access-secret|refresh-secret|private-code|client-secret/.test(result.data));
+    assert.equal(fs.readFileSync(f.tokenPath, 'utf8'), stored);
+    assert.equal((await f.api('/status')).data.services.gmail, false);
+  }
+});
+
+test('disconnect during optional Gmail profile lookup cannot resurrect credentials', async t => {
+  const f = await fixture(t); await f.connect('drive'); const url = await f.start('gmail');
+  let release, entered; const ready = new Promise(resolve => { entered = resolve; });
+  f.setMock(async call => {
+    if (!call.url.endsWith('/profile')) return null;
+    entered(); await new Promise(resolve => { release = resolve; }); return json({}, 403);
+  });
+  const callback = f.callback(url); await ready;
+  assert.equal((await f.api('/connection', { method: 'DELETE' })).status, 200); release();
+  const result = await callback; assert.equal(result.status, 400); assert.match(result.data, /Diagnostic: connection_changed/);
+  assert.equal(fs.existsSync(f.tokenPath), false); assert.equal((await f.api('/status')).data.connected, false);
 });
 
 test('refresh preserves refresh token, refreshes before mutations, does not expose tokens', async t => {
