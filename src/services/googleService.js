@@ -1,7 +1,6 @@
 /*
  * This file is part of FlowAutomate.
  *
- * Copyright © 2026 midra001
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * FlowAutomate is free software: you can redistribute it and/or modify
@@ -18,10 +17,16 @@
  * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
  *
  * @author midra001
- * @since 2026-09-26
  */
 
 const keys = new Map();
+const KEY_PREFIX = 'flowautomate.google.demoKey:';
+// Keep backend access keys out of workflow documents and execution logs.
+// On web, sessionStorage survives reloads in this tab, not closing the tab.
+function sessionStore() {
+  try { return typeof window !== 'undefined' ? window.sessionStorage : null; }
+  catch { return null; } // Storage may be disabled; memory still works.
+}
 const DEFAULT_BACKEND = process.env.EXPO_PUBLIC_FLOWAUTOMATE_API_URL || 'http://localhost:3000';
 export const GOOGLE_NODE_TYPES = ['gmail_send', 'gmail_read', 'google_sheets', 'google_drive'];
 export function googleBackendUrl(config = {}) {
@@ -36,15 +41,33 @@ export function googleBackendUrl(config = {}) {
   }
   return parsed.origin;
 }
-export function setGoogleDemoKey(config, value) { keys.set(googleBackendUrl(config), value.trim()); }
-export function hasGoogleDemoKey(config) { return !!keys.get(googleBackendUrl(config)); }
+export function setGoogleDemoKey(config, value) {
+  const base = googleBackendUrl(config);
+  const key = value.trim();
+  if (key) keys.set(base, key); else keys.delete(base);
+  try {
+    const storage = sessionStore();
+    if (key) storage?.setItem(KEY_PREFIX + base, key);
+    else storage?.removeItem(KEY_PREFIX + base);
+  } catch { /* Keep the current app session usable when storage is blocked. */ }
+}
+export function getGoogleDemoKey(config = {}) {
+  const base = googleBackendUrl(config);
+  if (keys.has(base)) return keys.get(base);
+  try {
+    const key = sessionStore()?.getItem(KEY_PREFIX + base) || '';
+    if (key) keys.set(base, key);
+    return key;
+  } catch { return ''; }
+}
+export function hasGoogleDemoKey(config) { return !!getGoogleDemoKey(config); }
 export function usesGoogleOAuth(node) {
   return GOOGLE_NODE_TYPES.includes(node.type) && !(node.type === 'gmail_send' && (node.config?.googleProvider === 'legacy' || (node.config?.webhookUrl && !node.config?.googleProvider)));
 }
 export async function googleRequest(config, path, options = {}) {
   const base = googleBackendUrl(config);
-  const key = keys.get(base);
-  if (!key) throw new Error('Open a Google node configuration and enter your backend demo access key first. It is cleared when the app reloads.');
+  const key = getGoogleDemoKey(config);
+  if (!key) throw new Error('Open a Google node configuration, enter your backend demo access key, and save. Keys last for this browser tab session (or the current native app session).');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60000);
   try {
