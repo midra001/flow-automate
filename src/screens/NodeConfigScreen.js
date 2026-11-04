@@ -1,12 +1,26 @@
+/*
+ * This file is part of FlowAutomate.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * FlowAutomate is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * FlowAutomate is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * @author midra001
+ */
+
 import GoogleNodeFields from '../components/GoogleNodeFields';
 import { googleBackendUrl, usesGoogleOAuth } from '../services/googleService';
-// src/screens/NodeConfigScreen.js
-// Restyled to match the FlowAutomate landing / home / history screens:
-//  - near-black background, purple header glow, logo nav bar
-//  - rounded black form card, dark inputs with a purple focus border
-//  - pill option buttons, white primary Save button
-// Includes merged Gemini AI Extraction and Discord Action node configuration.
-// Requires: react-native-svg
 
 import React, { useRef, useState, useLayoutEffect } from 'react';
 import {
