@@ -1,7 +1,6 @@
 /*
  * This file is part of FlowAutomate.
  *
- * Copyright © 2026 midra001
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * FlowAutomate is free software: you can redistribute it and/or modify
@@ -18,12 +17,11 @@
  * along with FlowAutomate. If not, see <https://www.gnu.org/licenses/>.
  *
  * @author midra001
- * @since 2026-09-26
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform, Linking } from 'react-native';
-import { googleRequest, googleBackendUrl, hasGoogleDemoKey, setGoogleDemoKey } from '../services/googleService';
+import { googleRequest, googleBackendUrl, getGoogleDemoKey, setGoogleDemoKey } from '../services/googleService';
 
 const styles = StyleSheet.create({
   box: { gap: 14 }, label: { color: '#FFFFFF', fontSize: 13, marginBottom: 6 },
@@ -40,7 +38,7 @@ function Button({ label, onPress, active, disabled }) {
   return <TouchableOpacity disabled={disabled} onPress={onPress} style={[styles.button, active && styles.active, disabled && { opacity: 0.5 }]}><Text style={styles.buttonText}>{label}</Text></TouchableOpacity>;
 }
 
-export default function GoogleNodeFields({ type, config, setConfig }) {
+const GoogleNodeFields = forwardRef(function GoogleNodeFields({ type, config, setConfig }, ref) {
   const [key, setKey] = useState('');
   const [status, setStatus] = useState(null);
   const [message, setMessage] = useState('');
@@ -51,12 +49,16 @@ export default function GoogleNodeFields({ type, config, setConfig }) {
   const legacy = type === 'gmail_send' && (config.googleProvider === 'legacy' || (config.webhookUrl && !config.googleProvider));
   const update = field => value => setConfig(previous => ({ ...previous, [field]: value }));
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; clearInterval(polling.current); }; }, []);
-  useEffect(() => { setStatus(null); setKey(''); setMessage(''); clearInterval(polling.current); setBusy(false); }, [config.backendUrl]);
+  useEffect(() => {
+    setStatus(null); setMessage(''); clearInterval(polling.current); setBusy(false);
+    try { setKey(getGoogleDemoKey(config)); } catch { setKey(''); }
+  }, [config.backendUrl]);
   function prepare() {
     googleBackendUrl(config);
-    if (key.trim()) setGoogleDemoKey(config, key);
-    if (!hasGoogleDemoKey(config)) throw new Error('Enter GOOGLE_DEMO_API_KEY from your backend .env.');
+    if (!key.trim()) throw new Error('Enter GOOGLE_DEMO_API_KEY from your backend .env.');
+    setGoogleDemoKey(config, key);
   }
+  useImperativeHandle(ref, () => ({ saveCredential: prepare }));
   async function check() {
     try { prepare(); const value = await googleRequest(config, '/status'); if (mounted.current) { setStatus(value); setMessage(value.services?.[service] ? 'Ready for this Google service.' : 'Connect this service below.'); } }
     catch (error) { if (mounted.current) setMessage(error.message); }
@@ -104,9 +106,10 @@ export default function GoogleNodeFields({ type, config, setConfig }) {
     {legacy ? field('webhookUrl', 'Apps Script URL', 'https://script.google.com/macros/s/...') : <>
       <Text style={styles.hint}>Local, single-user demo: one Google account is shared by workflows on this backend. Google credentials stay on the server. Connect each service you need.</Text>
       {field('backendUrl', 'Google backend URL', 'http://localhost:3000', 'For a remote backend, HTTPS is required.')}
-      <Field label="Demo access key" hint="Backend GOOGLE_DEMO_API_KEY. Kept only in app memory; re-enter after a reload. Never put Google client secrets here." value={key} onChangeText={setKey} secureTextEntry placeholder="Enter backend demo access key" />
+      <Field label="Demo access key" hint="Backend GOOGLE_DEMO_API_KEY. Saved for this browser tab session (including reloads), or the current native app session; never stored in workflow documents. Browser session storage is not an encrypted vault. Never put Google client secrets here." value={key} onChangeText={setKey} secureTextEntry placeholder="Enter backend demo access key" />
       <View style={styles.row}><Button label={busy ? 'Waiting…' : `Connect ${service === 'gmail' ? 'Gmail' : service === 'sheets' ? 'Sheets' : 'Drive'}`} onPress={connect} disabled={busy} /><Button label="Check connection" onPress={check} /><Button label="Disconnect all Google services" onPress={disconnect} disabled={busy || !status?.connected} /></View>
       {status ? <Text style={styles.hint}>{status.connected ? `Connected${status.email ? `: ${status.email}` : ''}` : 'Not connected'} · {Object.entries(status.services || {}).filter(([, value]) => value).map(([name]) => name).join(', ') || 'No service permissions'}</Text> : null}
+      {status?.warning ? <Text accessibilityLiveRegion="polite" style={[styles.hint, { color: '#FBBF24' }]}>{status.warning}</Text> : null}
       {message ? <Text accessibilityLiveRegion="polite" style={styles.hint}>{message}</Text> : null}
     </>}
     {type === 'gmail_send' && <>
@@ -141,4 +144,5 @@ export default function GoogleNodeFields({ type, config, setConfig }) {
       </>}
     </>}
   </View>;
-}
+});
+export default GoogleNodeFields;
