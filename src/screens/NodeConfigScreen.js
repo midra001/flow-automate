@@ -1,4 +1,5 @@
 import GoogleNodeFields from '../components/GoogleNodeFields';
+import { googleBackendUrl, usesGoogleOAuth } from '../services/googleService';
 // src/screens/NodeConfigScreen.js
 // Restyled to match the FlowAutomate landing / home / history screens:
 //  - near-black background, purple header glow, logo nav bar
@@ -7,7 +8,7 @@ import GoogleNodeFields from '../components/GoogleNodeFields';
 // Includes merged Gemini AI Extraction and Discord Action node configuration.
 // Requires: react-native-svg
 
-import React, { useState, useLayoutEffect } from 'react';
+import React, { useRef, useState, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -146,6 +147,8 @@ export default function NodeConfigScreen({ route, navigation }) {
   const { node, onSave } = route.params;
   const { width } = useWindowDimensions();
   const padX = width < 640 ? 20 : 28;
+  const googleFields = useRef(null);
+  const [saveError, setSaveError] = useState('');
 
   // Hide the navigator's default header (this screen draws its own)
   useLayoutEffect(() => {
@@ -175,6 +178,16 @@ export default function NodeConfigScreen({ route, navigation }) {
 
   const handleSave = () => {
     const savedConfig = { ...(node.config || {}), ...config };
+    try {
+      if (usesGoogleOAuth({ ...node, config: savedConfig })) {
+        googleFields.current.saveCredential();
+        savedConfig.backendUrl = googleBackendUrl(savedConfig);
+      }
+    } catch (error) {
+      setSaveError(error.message);
+      return;
+    }
+    setSaveError('');
     if (node.type === 'discord_trigger' || node.type === 'discord_action') delete savedConfig.botToken;
     onSave({ ...node, config: savedConfig });
     navigation.goBack();
@@ -465,7 +478,7 @@ export default function NodeConfigScreen({ route, navigation }) {
 
         {/* Google Workspace integrations */}
         {['gmail_send', 'gmail_read', 'google_sheets', 'google_drive'].includes(node.type) && (
-          <GoogleNodeFields type={node.type} config={config} setConfig={setConfig} />
+          <GoogleNodeFields ref={googleFields} type={node.type} config={config} setConfig={setConfig} />
         )}
 
         {/* Discord Action */}
@@ -619,6 +632,7 @@ export default function NodeConfigScreen({ route, navigation }) {
           <InfoBox>This node reads live system data automatically. No manual configuration required!</InfoBox>
         )}
 
+        {saveError ? <Text accessibilityLiveRegion="polite" style={[s.hint, { color: '#F87171', marginTop: 20 }]}>{saveError}</Text> : null}
         <View style={s.actions}>
           <ActionButton onPress={() => navigation.goBack()}>Cancel</ActionButton>
           <ActionButton solid onPress={handleSave}>
