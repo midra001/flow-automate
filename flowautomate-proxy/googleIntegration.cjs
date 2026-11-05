@@ -344,6 +344,7 @@ function createGoogleRouter({ env = process.env, fetchImpl = globalThis.fetch, t
         messages.push(decoded);
       }
       result = { messages, nextPageToken: list.nextPageToken || null, resultSizeEstimate: list.resultSizeEstimate || 0 };
+      res.set('X-FlowAutomate-Gmail-Read-Schema', 'normalized-v1');
     } else if (type === 'google_sheets') {
       const action = config.action || 'read';
       if (!['read', 'append'].includes(action)) throw error(400, 'Sheets action must be read or append.');
