@@ -86,9 +86,66 @@ function mimeMessage(config, input) {
   const encodedName = encodeURIComponent(name).replace(/['()*]/g, ch => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
   return headers.concat(`Content-Type: multipart/mixed; boundary="${boundary}"`, '', `--${boundary}`, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64(body), `--${boundary}`, 'Content-Type: application/octet-stream', `Content-Disposition: attachment; filename="attachment"; filename*=UTF-8''${encodedName}`, 'Content-Transfer-Encoding: base64', '', b64(content), `--${boundary}--`, '').join('\r\n');
 }
-function plainBody(payload) {
-  if (payload?.mimeType === 'text/plain' && payload.body?.data) return Buffer.from(payload.body.data, 'base64url').toString('utf8');
-  return (payload?.parts || []).map(plainBody).filter(Boolean).join('\n');
+function messageHeaders(payload) {
+  const headers = new Map();
+  for (const header of Array.isArray(payload?.headers) ? payload.headers : []) {
+    if (typeof header?.name !== 'string' || typeof header.value !== 'string') continue;
+    const name = header.name.trim().toLowerCase();
+    if (!headers.has(name)) headers.set(name, header.value);
+  }
+  return headers;
+}
+function decodeBody(data, contentType) {
+  if (typeof data !== 'string' || !data) return '';
+  // Buffer's decoder silently accepts garbage. Validate padding and canonical
+  // Base64URL first so a damaged part cannot become misleading body text.
+  if (!/^[A-Za-z0-9_-]+={0,2}$/.test(data)) return '';
+  const unpadded = data.replace(/=+$/, '');
+  if (unpadded.length % 4 === 1 || (data.includes('=') && data.length % 4 !== 0)) return '';
+  const bytes = Buffer.from(unpadded, 'base64url');
+  if (bytes.toString('base64url') !== unpadded) return '';
+  const charset = /(?:^|;)\s*charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i.exec(contentType || '');
+  let decoder;
+  try { decoder = new TextDecoder(charset?.[1] || charset?.[2] || charset?.[3] || 'utf-8', { fatal: true }); }
+  catch { decoder = new TextDecoder('utf-8', { fatal: true }); }
+  try { return decoder.decode(bytes); } catch { return ''; }
+}
+function messageBodies(payload) {
+  const bodyText = [], bodyHtml = [], pending = [payload];
+  // Walk the complete MIME tree without recursive call-stack limits. Preserve
+  // MIME order and keep plain and HTML alternatives separate.
+  while (pending.length) {
+    const part = pending.pop();
+    if (!part || typeof part !== 'object' || Array.isArray(part)) continue;
+    const headers = messageHeaders(part);
+    if ((typeof part.filename === 'string' && part.filename.trim()) || /^\s*attachment(?:\s*;|\s*$)/i.test(headers.get('content-disposition') || '')) continue;
+    const contentType = headers.get('content-type') || (typeof part.mimeType === 'string' ? part.mimeType : '');
+    const mimeType = (typeof part.mimeType === 'string' ? part.mimeType : contentType).split(';')[0].trim().toLowerCase();
+    const body = decodeBody(part.body?.data, contentType);
+    if (body && mimeType === 'text/plain') bodyText.push(body);
+    if (body && mimeType === 'text/html') bodyHtml.push(body);
+    if (Array.isArray(part.parts)) {
+      for (let i = part.parts.length - 1; i >= 0; i--) pending.push(part.parts[i]);
+    }
+  }
+  return { bodyText: bodyText.join('\n'), bodyHtml: bodyHtml.join('\n') };
+}
+function plainBody(payload) { return messageBodies(payload).bodyText; }
+function parseGmailMessage(message) {
+  const source = message && typeof message === 'object' && !Array.isArray(message) ? message : {};
+  const headers = messageHeaders(source.payload), bodies = messageBodies(source.payload);
+  const string = value => typeof value === 'string' ? value : '';
+  const labels = Array.isArray(source.labelIds) ? source.labelIds.filter(label => typeof label === 'string') : [];
+  return {
+    // Retain original API fields (including payload and labelIds) for workflows
+    // already using them; normalized fields are the primary convenient view.
+    ...source,
+    id: string(source.id), threadId: string(source.threadId),
+    from: headers.get('from') || '', to: headers.get('to') || '',
+    subject: headers.get('subject') || '', date: headers.get('date') || '',
+    snippet: string(source.snippet), ...bodies, labels,
+    body: bodies.bodyText, // Backward-compatible plain-text alias, not HTML.
+  };
 }
 
 function createGoogleRouter({ env = process.env, fetchImpl = globalThis.fetch, tokenPath = path.join(__dirname, '.data', 'google-tokens.enc'), now = Date.now, stateTtlMs = 5 * 60 * 1000 } = {}) {
@@ -281,7 +338,7 @@ function createGoogleRouter({ env = process.env, fetchImpl = globalThis.fetch, t
       const messages = []; let messageBytes = 0;
       for (const item of (list.messages || []).slice(0, Number(query.get('maxResults')))) {
         const message = await request(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(item.id)}?format=full`);
-        const decoded = { ...message, body: plainBody(message.payload) };
+        const decoded = parseGmailMessage(message);
         messageBytes += Buffer.byteLength(JSON.stringify(decoded));
         if (messageBytes > 12 * 1024 * 1024) throw error(502, 'Gmail results exceed the 12 MiB demo limit. Narrow the query or reduce maxResults.');
         messages.push(decoded);
@@ -325,4 +382,4 @@ function createGoogleRouter({ env = process.env, fetchImpl = globalThis.fetch, t
   router.use((err, req, res, next) => res.status(err.status >= 400 && err.status <= 599 ? err.status : 500).json({ error: err.status ? err.message : 'Google integration failed. Check local backend configuration.' }));
   return router;
 }
-module.exports = { createGoogleRouter, SCOPES, mimeMessage, plainBody };
+module.exports = { createGoogleRouter, SCOPES, mimeMessage, plainBody, parseGmailMessage };
