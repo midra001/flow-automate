@@ -27,7 +27,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const express = require('express');
-const { createGoogleRouter, SCOPES, mimeMessage } = require('../googleIntegration.cjs');
+const { createGoogleRouter, SCOPES, mimeMessage, plainBody, parseGmailMessage } = require('../googleIntegration.cjs');
 const { createApp } = require('../server.js');
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -256,8 +256,127 @@ test('Gmail Unicode MIME attachment, plain body decoding and full message shape'
   f.setMock(call => call.url.includes('/messages?') ? json({ messages: [{ id: 'm1' }], resultSizeEstimate: 1, nextPageToken: 'gmail-next' }) : call.url.includes('/messages/m1?format=full') ? json({ id: 'm1', snippet: 'preview', payload: { mimeType: 'multipart/alternative', parts: [{ mimeType: 'text/plain', body: { data: Buffer.from('Hello 🌏').toString('base64url') } }] } }) : null);
   const read = await f.api('/execute', { method: 'POST', body: { type: 'gmail_read', config: { query: 'from:a@example.com & subject:hello', maxResults: 2, pageToken: 'gmail-page2' } } });
   assert.equal(read.data.messages[0].body, 'Hello 🌏'); assert.ok(read.data.messages[0].payload.parts);
+  assert.equal(read.data.messages[0].bodyText, 'Hello 🌏'); assert.equal(read.data.messages[0].bodyHtml, '');
   const list = new URL(f.calls.find(c => c.url.includes('/messages?')).url); assert.equal(list.searchParams.get('q'), 'from:a@example.com & subject:hello');
   assert.equal(list.searchParams.get('pageToken'), 'gmail-page2'); assert.equal(read.data.nextPageToken, 'gmail-next');
+});
+
+const gmailPart = (mimeType, content, extra = {}) => ({ mimeType, body: { data: Buffer.from(content).toString('base64url') }, ...extra });
+
+test('Gmail parsing flattens case-insensitive headers and preserves IDs, labels and original fields', () => {
+  const message = {
+    id: 'm1', threadId: 'thread1', snippet: 'preview', labelIds: ['UNREAD', 'INBOX'], internalDate: '123', historyId: '456',
+    payload: gmailPart('text/plain', 'Hello résumé 🌏', { headers: [
+      null, { name: 'from', value: 42 }, { name: 'fRoM', value: 'Sender <sender@example.com>' },
+      { name: 'TO', value: 'a@example.com, b@example.com' }, { name: 'subject', value: 'Résumé' }, { name: 'DaTe', value: 'Thu, 5 Nov 2026 12:00:00 +0530' },
+    ] }),
+  };
+  const before = JSON.stringify(message), parsed = parseGmailMessage(message);
+  assert.equal(parsed.from, 'Sender <sender@example.com>'); assert.equal(parsed.to, 'a@example.com, b@example.com');
+  assert.equal(parsed.subject, 'Résumé'); assert.equal(parsed.date, 'Thu, 5 Nov 2026 12:00:00 +0530');
+  assert.equal(parsed.bodyText, 'Hello résumé 🌏'); assert.equal(parsed.bodyHtml, ''); assert.equal(parsed.body, parsed.bodyText);
+  for (const field of ['id', 'threadId', 'snippet', 'internalDate', 'historyId']) assert.equal(parsed[field], message[field]);
+  assert.deepEqual(parsed.labels, message.labelIds); assert.deepEqual(parsed.labelIds, message.labelIds);
+  assert.deepEqual(parsed.payload, message.payload); assert.equal(JSON.stringify(message), before);
+});
+
+test('Gmail HTML-only top-level bodies are decoded separately without pretending HTML is plain text', () => {
+  const html = '<html><body>Hi &amp; welcome 🌏</body></html>';
+  const parsed = parseGmailMessage({ payload: gmailPart('text/html', html) });
+  assert.equal(parsed.bodyHtml, html); assert.equal(parsed.bodyText, ''); assert.equal(parsed.body, '');
+});
+
+test('Gmail deeply nested multipart mixed/alternative/related preserves text and HTML order', () => {
+  const payload = { mimeType: 'multipart/mixed', parts: [
+    { mimeType: 'multipart/alternative', parts: [gmailPart('text/plain', 'First'), { mimeType: 'multipart/related', parts: [gmailPart('text/html', '<p>First</p>'), gmailPart('image/png', 'not text')] }] },
+    { mimeType: 'multipart/mixed', parts: [gmailPart('text/plain', 'Second'), gmailPart('text/html', '<p>Second</p>')] },
+  ] };
+  const parsed = parseGmailMessage({ payload });
+  assert.equal(parsed.bodyText, 'First\nSecond'); assert.equal(parsed.bodyHtml, '<p>First</p>\n<p>Second</p>');
+  assert.equal(plainBody(payload), parsed.bodyText);
+});
+
+test('Gmail text attachments are excluded without losing the actual message', () => {
+  const payload = { parts: [
+    gmailPart('text/plain', 'Actual body'),
+    gmailPart('text/plain', 'Secret attachment', { filename: 'notes.txt' }),
+    gmailPart('text/html', '<p>Attachment</p>', { headers: [{ name: 'Content-Disposition', value: 'attachment; filename="notes.html"' }] }),
+    { mimeType: 'multipart/mixed', filename: 'forward.eml', parts: [gmailPart('text/plain', 'Attached message')] },
+  ] };
+  const parsed = parseGmailMessage({ payload });
+  assert.equal(parsed.bodyText, 'Actual body'); assert.equal(parsed.bodyHtml, '');
+});
+
+test('Gmail accepts padded and unpadded Base64URL including URL-specific characters', () => {
+  // This text produces both '-' and '_' in the URL-safe encoding.
+  const value = '\u083e\u083f';
+  const data = Buffer.from(value).toString('base64url'); assert.match(data, /-/); assert.match(data, /_/);
+  assert.equal(plainBody({ mimeType: 'text/plain', body: { data } }), value);
+  for (const text of ['a', 'ab', 'abc', 'résumé 🌏']) {
+    const encoded = Buffer.from(text).toString('base64url');
+    for (const data of [encoded, encoded.padEnd(Math.ceil(encoded.length / 4) * 4, '=')]) {
+      assert.equal(plainBody({ mimeType: 'text/plain', body: { data } }), text);
+    }
+  }
+});
+
+test('Gmail malformed body data is skipped while valid sibling parts survive', () => {
+  for (const data of [null, 123, {}, [], '', '!!!', 'a', 'Zg=', 'Zg===', 'Zg==junk', 'Zh', '_w', 'SGVsbG8+']) {
+    const payload = { parts: [{ mimeType: 'text/plain', body: { data } }, gmailPart('text/plain', 'Good') ] };
+    assert.equal(plainBody(payload), 'Good', JSON.stringify(data));
+  }
+});
+
+test('Gmail missing and malformed messages, headers, bodies and child arrays do not crash', () => {
+  for (const message of [undefined, null, 42, [], {}, { payload: null }, { payload: { headers: {}, body: null, parts: {} } }, { payload: { headers: [null, 3, {}, { name: 2, value: [] }], parts: [null, 3, [], { parts: 'bad' }] }, labelIds: 'bad' }]) {
+    const parsed = parseGmailMessage(message);
+    for (const field of ['id', 'threadId', 'from', 'to', 'subject', 'date', 'snippet', 'body', 'bodyText', 'bodyHtml']) assert.equal(parsed[field], '', field);
+    assert.deepEqual(parsed.labels, []);
+  }
+  assert.equal(plainBody(gmailPart('application/pdf', 'Not a body')), '');
+  assert.equal(plainBody({ mimeType: 'text/plain', body: { attachmentId: 'not-inline' } }), '');
+});
+
+test('Gmail honors declared charsets and falls back safely for unknown charsets', () => {
+  const payload = { mimeType: 'TEXT/PLAIN; charset=iso-8859-1', headers: [{ name: 'CONTENT-TYPE', value: 'text/plain; charset="iso-8859-1"' }], body: { data: Buffer.from([0x63, 0x61, 0x66, 0xe9]).toString('base64url') } };
+  assert.equal(plainBody(payload), 'café');
+  assert.equal(plainBody({ ...payload, headers: [] }), 'café');
+  assert.equal(plainBody(gmailPart('text/plain', 'Hi 🌏', { headers: [{ name: 'Content-Type', value: 'text/plain; charset=unknown-charset' }] })), 'Hi 🌏');
+  assert.equal(plainBody(gmailPart(undefined, 'Inferred', { headers: [{ name: 'Content-Type', value: 'text/plain; charset=UTF-8' }] })), 'Inferred');
+});
+
+test('Gmail MIME traversal avoids recursive stack overflow', () => {
+  let payload = gmailPart('text/plain', 'Deep body');
+  for (let i = 0; i < 15000; i++) payload = { mimeType: 'multipart/mixed', parts: [payload] };
+  assert.equal(plainBody(payload), 'Deep body');
+});
+
+test('Gmail read endpoint returns normalized HTML and plain messages and preserves pagination', async t => {
+  const f = await fixture(t); await f.connect('gmail');
+  const messages = [
+    { id: 'html1', threadId: 'thread1', snippet: 'hello', labelIds: ['INBOX'], payload: gmailPart('text/html', '<p>Hello</p>', { headers: [{ name: 'FROM', value: 'a@example.com' }, { name: 'subject', value: 'Hi' }] }) },
+    { id: 'plain1', threadId: 'thread2', labelIds: ['UNREAD'], payload: { mimeType: 'multipart/alternative', parts: [gmailPart('text/plain', 'Plain'), gmailPart('text/html', '<p>Plain</p>')] } },
+  ];
+  f.setMock(call => {
+    const url = new URL(call.url);
+    if (url.pathname.endsWith('/messages')) return json({ messages: messages.map(({ id }) => ({ id })), nextPageToken: 'next-page', resultSizeEstimate: 201 });
+    const message = messages.find(message => url.pathname.endsWith(`/messages/${message.id}`));
+    return message ? json(message) : null;
+  });
+  const response = await f.api('/execute', { method: 'POST', body: { type: 'gmail_read', config: { query: 'is:unread', maxResults: 5, pageToken: 'current-page' } } });
+  assert.equal(response.status, 200); assert.equal(response.data.messages.length, 2);
+  assert.deepEqual(response.data.messages, messages.map(parseGmailMessage));
+  assert.equal(response.data.messages[0].bodyHtml, '<p>Hello</p>'); assert.equal(response.data.messages[0].from, 'a@example.com');
+  assert.equal(response.data.messages[1].bodyText, 'Plain'); assert.equal(response.data.nextPageToken, 'next-page'); assert.equal(response.data.resultSizeEstimate, 201);
+  const list = new URL(f.calls.find(call => call.url.includes('/messages?')).url);
+  assert.equal(list.searchParams.get('q'), 'is:unread'); assert.equal(list.searchParams.get('maxResults'), '5'); assert.equal(list.searchParams.get('pageToken'), 'current-page');
+});
+
+test('Gmail empty inbox has stable pagination defaults', async t => {
+  const f = await fixture(t); await f.connect('gmail');
+  f.setMock(call => call.url.includes('/messages?') ? json({ resultSizeEstimate: 0 }) : null);
+  const response = await f.api('/execute', { method: 'POST', body: { type: 'gmail_read' } });
+  assert.equal(response.status, 200); assert.deepEqual(response.data, { messages: [], nextPageToken: null, resultSizeEstimate: 0 });
 });
 
 test('Sheets RAW append accepts JSON or input 2D array, escapes ranges, rejects invalid values', async t => {
