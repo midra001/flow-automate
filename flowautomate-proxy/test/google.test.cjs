@@ -352,7 +352,7 @@ test('Gmail MIME traversal avoids recursive stack overflow', () => {
 });
 
 test('Gmail read endpoint returns normalized HTML and plain messages and preserves pagination', async t => {
-  const f = await fixture(t); await f.connect('gmail');
+  const f = await fixture(t, { full: true }); await f.connect('gmail');
   const messages = [
     { id: 'html1', threadId: 'thread1', snippet: 'hello', labelIds: ['INBOX'], payload: gmailPart('text/html', '<p>Hello</p>', { headers: [{ name: 'FROM', value: 'a@example.com' }, { name: 'subject', value: 'Hi' }] }) },
     { id: 'plain1', threadId: 'thread2', labelIds: ['UNREAD'], payload: { mimeType: 'multipart/alternative', parts: [gmailPart('text/plain', 'Plain'), gmailPart('text/html', '<p>Plain</p>')] } },
@@ -365,11 +365,46 @@ test('Gmail read endpoint returns normalized HTML and plain messages and preserv
   });
   const response = await f.api('/execute', { method: 'POST', body: { type: 'gmail_read', config: { query: 'is:unread', maxResults: 5, pageToken: 'current-page' } } });
   assert.equal(response.status, 200); assert.equal(response.data.messages.length, 2);
-  assert.deepEqual(response.data.messages, messages.map(parseGmailMessage));
+  assert.equal(response.headers.get('x-flowautomate-gmail-read-schema'), 'normalized-v1');
+  // Assert the HTTP contract independently of the parser helper. Raw upstream
+  // messages deliberately have none of these normalized fields.
+  assert.deepEqual(response.data.messages.map(({ id, threadId, from, subject, bodyText, bodyHtml, labels }) =>
+    ({ id, threadId, from, subject, bodyText, bodyHtml, labels })), [
+    { id: 'html1', threadId: 'thread1', from: 'a@example.com', subject: 'Hi', bodyText: '', bodyHtml: '<p>Hello</p>', labels: ['INBOX'] },
+    { id: 'plain1', threadId: 'thread2', from: '', subject: '', bodyText: 'Plain', bodyHtml: '<p>Plain</p>', labels: ['UNREAD'] },
+  ]);
+  for (const message of response.data.messages) {
+    assert.equal(typeof message.bodyText, 'string'); assert.equal(typeof message.bodyHtml, 'string'); assert.ok(Array.isArray(message.labels));
+  }
   assert.equal(response.data.messages[0].bodyHtml, '<p>Hello</p>'); assert.equal(response.data.messages[0].from, 'a@example.com');
   assert.equal(response.data.messages[1].bodyText, 'Plain'); assert.equal(response.data.nextPageToken, 'next-page'); assert.equal(response.data.resultSizeEstimate, 201);
   const list = new URL(f.calls.find(call => call.url.includes('/messages?')).url);
   assert.equal(list.searchParams.get('q'), 'is:unread'); assert.equal(list.searchParams.get('maxResults'), '5'); assert.equal(list.searchParams.get('pageToken'), 'current-page');
+  assert.deepEqual(f.calls.filter(call => /\/messages\//.test(new URL(call.url).pathname)).map(call => new URL(call.url).searchParams.get('format')), ['full', 'full']);
+});
+
+test('real frontend Gmail service reaches the full backend and returns normalized messages unchanged', async t => {
+  const f = await fixture(t, { full: true }); await f.connect('gmail');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/services/googleService.js'), 'utf8');
+  const service = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+  const node = { type: 'gmail_read', config: { backendUrl: f.origin, query: 'is:unread', maxResults: '5', pageToken: 'page-two' } };
+  service.setGoogleDemoKey(node.config, f.env.GOOGLE_DEMO_API_KEY);
+  t.after(() => service.setGoogleDemoKey(node.config, ''));
+  f.setMock(call => {
+    const url = new URL(call.url);
+    if (url.pathname.endsWith('/messages')) return json({ messages: [{ id: 'html' }, { id: 'multi' }], nextPageToken: 'page-three', resultSizeEstimate: 201 });
+    if (url.pathname.endsWith('/messages/html')) return json({ id: 'html', threadId: 't1', labelIds: ['INBOX'], payload: gmailPart('text/html', '<p>HTML only</p>', { headers: [{ name: 'FROM', value: 'sender@example.com' }] }) });
+    if (url.pathname.endsWith('/messages/multi')) return json({ id: 'multi', threadId: 't2', labelIds: ['UNREAD'], payload: { mimeType: 'multipart/mixed', parts: [{ mimeType: 'multipart/alternative', parts: [gmailPart('text/plain', 'Readable'), gmailPart('text/html', '<p>Readable</p>')] }] } });
+    return null;
+  });
+  const result = await service.executeGoogleNode(node, null);
+  assert.deepEqual(result.messages.map(({ id, threadId, from, bodyText, bodyHtml, labels }) => ({ id, threadId, from, bodyText, bodyHtml, labels })), [
+    { id: 'html', threadId: 't1', from: 'sender@example.com', bodyText: '', bodyHtml: '<p>HTML only</p>', labels: ['INBOX'] },
+    { id: 'multi', threadId: 't2', from: '', bodyText: 'Readable', bodyHtml: '<p>Readable</p>', labels: ['UNREAD'] },
+  ]);
+  assert.equal(result.nextPageToken, 'page-three'); assert.equal(result.resultSizeEstimate, 201);
+  const list = new URL(f.calls.find(call => call.url.includes('/messages?')).url);
+  assert.equal(list.searchParams.get('q'), 'is:unread'); assert.equal(list.searchParams.get('maxResults'), '5'); assert.equal(list.searchParams.get('pageToken'), 'page-two');
 });
 
 test('Gmail empty inbox has stable pagination defaults', async t => {
@@ -377,6 +412,7 @@ test('Gmail empty inbox has stable pagination defaults', async t => {
   f.setMock(call => call.url.includes('/messages?') ? json({ resultSizeEstimate: 0 }) : null);
   const response = await f.api('/execute', { method: 'POST', body: { type: 'gmail_read' } });
   assert.equal(response.status, 200); assert.deepEqual(response.data, { messages: [], nextPageToken: null, resultSizeEstimate: 0 });
+  assert.equal(response.headers.get('x-flowautomate-gmail-read-schema'), 'normalized-v1');
 });
 
 test('Sheets RAW append accepts JSON or input 2D array, escapes ranges, rejects invalid values', async t => {
