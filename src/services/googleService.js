@@ -111,7 +111,15 @@ export async function executeGoogleNode(node, input, resolve = value => value) {
     config.action = config.action || 'list';
     if (!config.query) delete config.query;
   }
-  return googleRequest(node.config || {}, '/execute', {
+  const result = await googleRequest(node.config || {}, '/execute', {
     method: 'POST', body: JSON.stringify({ type: node.type, config, input }),
   });
+  // Do not silently accept pre-parser responses from an old backend process.
+  // Both the workflow runner and single-node action pass through this service.
+  if (node.type === 'gmail_read' && (!Array.isArray(result?.messages) || result.messages.some(message =>
+    !message || typeof message.bodyText !== 'string' || typeof message.bodyHtml !== 'string' || !Array.isArray(message.labels)
+  ))) {
+    throw new Error(`Gmail Read at ${googleBackendUrl(node.config || {})} returned an outdated or invalid message format. Replace flowautomate-proxy/googleIntegration.cjs in the backend you actually run, stop and restart that backend, verify this node's Backend URL, and run a new execution. Expected bodyText, bodyHtml and labels on every message.`);
+  }
+  return result;
 }
