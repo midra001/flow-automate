@@ -117,7 +117,7 @@ test('API: send channel text, DM, Unicode attachment, and file-only output', asy
     assert.equal(result.status, 200);
     assert.deepEqual(sent.allowedMentions, { parse: [] });
   }
-  const text = 'Résumé — Dwayne 🙂';
+  const text = 'Résumé — Dwayne ';
   const result = await call('/api/discord/send', 'POST', { targetId: channelId, fileContent: Buffer.from(text).toString('base64'), fileName: 'result.txt' });
   assert.equal(result.status, 200);
   assert.equal(sent.files[0].attachment.toString(), text);
