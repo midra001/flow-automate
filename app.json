@@ -1,8 +1,7 @@
-
 {
   "expo": {
     "name": "FlowAutomate",
-    "slug": "workflow-automator",
+    "slug": "flowautomate",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/favicon.png",
@@ -11,13 +10,20 @@
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/splash-icon.png"
-      }
+      },
+      "package": "com.gdsknapstlsteam.flowautomate"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-video"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e6d9895d-10fc-4b6e-8eda-70f36ae3c7ea"
+      }
+    },
+    "owner": "gdsknapstls-team"
   }
 }
