@@ -23,7 +23,6 @@ import * as THREE from 'three';
 import {originalCubeData} from './originalCubeData.js';
 import {createOriginalCubeMaterial} from './originalCubeMaterial.js';
 
-// Uses decoded original hero-cube geometry, its original UVs and scene material settings.
 export const HERO_DEFAULTS = {
   background: true,
   digital: false,
@@ -34,7 +33,7 @@ export const HERO_DEFAULTS = {
   size: 1,
   pixelRatio: 1.75,
   assetBase: null,
-  layout: 'standalone', // 'landing' positions the cube beside the page copy.
+  layout: 'standalone',
 };
 
 function randomGenerator(seed) {
@@ -98,7 +97,6 @@ const backgroundFragment = `
   }
 `;
 
-/** Mount the same scene in a browser or a React Native Web host element. */
 export function createHeroScene(container, options = {}) {
   const config = { ...HERO_DEFAULTS, ...options };
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: !config.background, powerPreference: 'high-performance' });
