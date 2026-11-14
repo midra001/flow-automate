@@ -13,8 +13,16 @@
       },
       "package": "com.gdsknapstlsteam.flowautomate"
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
+  "web": {
+    "favicon": "./assets/favicon.png",
+    "name": "FlowAutomate",
+    "shortName": "FlowAutomate",
+    "display": "standalone",
+    "orientation": "landscape",
+    "startUrl": "/",
+    "scope": "/",
+    "themeColor": "#09090B",
+    "backgroundColor": "#09090B"
     },
     "plugins": [
       "expo-video"
